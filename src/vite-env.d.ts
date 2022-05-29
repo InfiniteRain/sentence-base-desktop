@@ -3,5 +3,6 @@
 declare module "*.elm" {
   export const Elm: ElmInstance<{
     clipboard: PortToElm<string>;
+    updateTags: PortFromElm<string[]>;
   }>;
 }

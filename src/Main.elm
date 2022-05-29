@@ -1,17 +1,20 @@
 port module Main exposing (main)
 
 import Browser
-import Debug
-import Html exposing (Html, span, text)
+import Html exposing (Html, input, span, text)
+import Html.Attributes exposing (style, type_, value)
+import Html.Events exposing (onBlur, onInput)
 import Http
 import Json.Decode exposing (Decoder, bool, field, int, list, map, map2, map7, string)
 import List.FlatMap exposing (flatMap)
+import Regex
 
 
 
 -- MAIN
 
 
+main : Program Flags Model Msg
 main =
     Browser.element { init = init, view = view, update = update, subscriptions = subscriptions }
 
@@ -21,6 +24,9 @@ main =
 
 
 port clipboard : (String -> msg) -> Sub msg
+
+
+port updateTags : List String -> Cmd msg
 
 
 
@@ -60,14 +66,26 @@ type alias KotuComponent =
     }
 
 
-type alias Model =
-    { kotuStatus : KotuStatus
+type alias Flags =
+    { tags : List String
     }
 
 
-init : () -> ( Model, Cmd Msg )
-init () =
-    ( { kotuStatus = Loading }, Cmd.none )
+type alias Model =
+    { tags : List String
+    , tagsInput : String
+    , kotuStatus : KotuStatus
+    }
+
+
+init : Flags -> ( Model, Cmd Msg )
+init flags =
+    ( { kotuStatus = Success []
+      , tags = flags.tags
+      , tagsInput = String.join " " flags.tags
+      }
+    , Cmd.none
+    )
 
 
 
@@ -75,13 +93,30 @@ init () =
 
 
 type Msg
-    = ClipboardUpdated String
+    = UpdateTags
+    | UpdateTagsInput String
+    | ClipboardUpdated String
     | GotKotuResponse (Result Http.Error (List KotuSentence))
+
+
+spacesDelimiter : Regex.Regex
+spacesDelimiter =
+    Maybe.withDefault Regex.never <| Regex.fromString "\\s+"
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        UpdateTags ->
+            let
+                tags =
+                    Regex.split spacesDelimiter (String.trim model.tagsInput)
+            in
+            ( { model | tags = tags, tagsInput = String.join " " tags }, updateTags tags )
+
+        UpdateTagsInput tagsInput ->
+            ( { model | tagsInput = tagsInput }, Cmd.none )
+
         ClipboardUpdated newEntry ->
             ( { model | kotuStatus = Loading }, kotuQuery newEntry )
 
@@ -114,7 +149,16 @@ subscriptions _ =
 view : Model -> Html Msg
 view model =
     span []
-        [ text <|
+        [ text "Tags:"
+        , input
+            [ style "margin-left" "red"
+            , type_ "text"
+            , value model.tagsInput
+            , onInput UpdateTagsInput
+            , onBlur UpdateTags
+            ]
+            []
+        , text <|
             case model.kotuStatus of
                 Success components ->
                     String.join "" <| List.map (\a -> a.surface) components

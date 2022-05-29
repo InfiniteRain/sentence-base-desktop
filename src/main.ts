@@ -8,6 +8,9 @@ if (!appNode) {
 }
 
 const app = Elm.Main.init({
+  flags: {
+    tags: JSON.parse(localStorage.getItem("tags") ?? "[]"),
+  },
   node: appNode,
 });
 
@@ -21,3 +24,8 @@ setInterval(async () => {
     lastClipboardSnippet = currentClipboardSnippet;
   }
 }, 100);
+
+app.ports.updateTags.subscribe((tags) => {
+  console.log(tags);
+  localStorage.setItem("tags", JSON.stringify(tags));
+});
