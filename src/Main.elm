@@ -1,9 +1,11 @@
-module Main exposing (main)
+port module Main exposing (main)
 
 import Browser
-import Html exposing (Attribute, Html, input, span, text)
-import Html.Attributes exposing (..)
-import Html.Events exposing (onInput)
+import Debug
+import Html exposing (Html, span, text)
+import Http
+import Json.Decode exposing (Decoder, bool, field, int, list, map, map2, map7, string)
+import List.FlatMap exposing (flatMap)
 
 
 
@@ -11,21 +13,61 @@ import Html.Events exposing (onInput)
 
 
 main =
-    Browser.sandbox { init = init, update = update, view = view }
+    Browser.element { init = init, view = view, update = update, subscriptions = subscriptions }
+
+
+
+-- PORTS
+
+
+port clipboard : (String -> msg) -> Sub msg
 
 
 
 -- MODEL
 
 
-type alias Model =
-    { input : String
+type KotuStatus
+    = Failure
+    | Loading
+    | Success (List KotuComponent)
+
+
+type alias KotuSentence =
+    { accentPhrases : List KotuAccentPhrase
     }
 
 
-init : Model
-init =
-    { input = "" }
+type alias KotuAccentPhrase =
+    { components : List KotuComponent
+    }
+
+
+type alias KotuPitchAccent =
+    { descriptive : String
+    , mora : Int
+    }
+
+
+type alias KotuComponent =
+    { surface : String
+    , kana : String
+    , surfaceOriginal : String
+    , originalKana : String
+    , pitchAccent : List KotuPitchAccent
+    , isBasic : Bool
+    , partOfSpeech : String
+    }
+
+
+type alias Model =
+    { kotuStatus : KotuStatus
+    }
+
+
+init : () -> ( Model, Cmd Msg )
+init () =
+    ( { kotuStatus = Loading }, Cmd.none )
 
 
 
@@ -33,14 +75,36 @@ init =
 
 
 type Msg
-    = Change String
+    = ClipboardUpdated String
+    | GotKotuResponse (Result Http.Error (List KotuSentence))
 
 
-update : Msg -> Model -> Model
+update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        Change newInput ->
-            { model | input = newInput }
+        ClipboardUpdated newEntry ->
+            ( { model | kotuStatus = Loading }, kotuQuery newEntry )
+
+        GotKotuResponse result ->
+            case result of
+                Ok sentences ->
+                    let
+                        components =
+                            flatMap (\a -> a.components) <| flatMap (\a -> a.accentPhrases) sentences
+                    in
+                    ( { model | kotuStatus = Success components }, Cmd.none )
+
+                Err _ ->
+                    ( { model | kotuStatus = Failure }, Cmd.none )
+
+
+
+-- SUBSCRIPTIONS
+
+
+subscriptions : Model -> Sub Msg
+subscriptions _ =
+    clipboard ClipboardUpdated
 
 
 
@@ -49,19 +113,60 @@ update msg model =
 
 view : Model -> Html Msg
 view model =
-    case String.toFloat model.input of
-        Just celsius ->
-            viewConverter model.input "blue" (String.fromFloat (celsius * 1.8 + 32))
-
-        Nothing ->
-            viewConverter model.input "red" "???"
-
-
-viewConverter : String -> String -> String -> Html Msg
-viewConverter userInput color equivalentTemp =
     span []
-        [ input [ value userInput, onInput Change, style "width" "40px" ] []
-        , text "°C = "
-        , span [ style "color" color ] [ text equivalentTemp ]
-        , text "°F"
+        [ text <|
+            case model.kotuStatus of
+                Success components ->
+                    String.join "" <| List.map (\a -> a.surface) components
+
+                Loading ->
+                    "..."
+
+                Failure ->
+                    "Something went wrong."
         ]
+
+
+
+-- HTTP
+
+
+kotuQuery : String -> Cmd Msg
+kotuQuery query =
+    Http.post
+        { url = "https://kotu.io/api/dictionary/parse"
+        , body = Http.stringBody "text/plain" query
+        , expect = Http.expectJson GotKotuResponse kotuDecoder
+        }
+
+
+
+--　猫が鳴いている。
+
+
+kotuDecoder : Decoder (List KotuSentence)
+kotuDecoder =
+    list <|
+        map KotuSentence
+            (field "accentPhrases"
+                (list <|
+                    map KotuAccentPhrase
+                        (field "components"
+                            (list <|
+                                map7 KotuComponent
+                                    (field "surface" string)
+                                    (field "kana" string)
+                                    (field "surfaceOriginal" string)
+                                    (field "originalKana" string)
+                                    (field "pitchAccents" <|
+                                        list <|
+                                            map2 KotuPitchAccent
+                                                (field "descriptive" string)
+                                                (field "mora" int)
+                                    )
+                                    (field "isBasic" bool)
+                                    (field "partOfSpeech" string)
+                            )
+                        )
+                )
+            )
