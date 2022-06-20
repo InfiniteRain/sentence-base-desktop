@@ -1,9 +1,9 @@
 port module Main exposing (main)
 
 import Browser
-import Html exposing (Html, input, span, text)
+import Html exposing (Html, br, button, hr, input, span, text)
 import Html.Attributes exposing (style, type_, value)
-import Html.Events exposing (onBlur, onInput)
+import Html.Events exposing (onBlur, onClick, onInput)
 import Http
 import Json.Decode exposing (Decoder, bool, field, int, list, map, map2, map7, string)
 import List.FlatMap exposing (flatMap)
@@ -75,6 +75,7 @@ type alias Model =
     { tags : List String
     , tagsInput : String
     , kotuStatus : KotuStatus
+    , selectedComponent : Maybe KotuComponent
     }
 
 
@@ -83,6 +84,7 @@ init flags =
     ( { kotuStatus = Success []
       , tags = flags.tags
       , tagsInput = String.join " " flags.tags
+      , selectedComponent = Nothing
       }
     , Cmd.none
     )
@@ -95,8 +97,9 @@ init flags =
 type Msg
     = UpdateTags
     | UpdateTagsInput String
-    | ClipboardUpdated String
+    | UpdateSentence String
     | GotKotuResponse (Result Http.Error (List KotuSentence))
+    | SelectComponent KotuComponent
 
 
 spacesDelimiter : Regex.Regex
@@ -117,8 +120,13 @@ update msg model =
         UpdateTagsInput tagsInput ->
             ( { model | tagsInput = tagsInput }, Cmd.none )
 
-        ClipboardUpdated newEntry ->
-            ( { model | kotuStatus = Loading }, kotuQuery newEntry )
+        UpdateSentence newEntry ->
+            case newEntry of
+                "" ->
+                    ( { model | kotuStatus = Success [] }, Cmd.none )
+
+                _ ->
+                    ( { model | kotuStatus = Loading }, kotuQuery newEntry )
 
         GotKotuResponse result ->
             case result of
@@ -132,6 +140,9 @@ update msg model =
                 Err _ ->
                     ( { model | kotuStatus = Failure }, Cmd.none )
 
+        SelectComponent component ->
+            ( { model | selectedComponent = Just component }, Cmd.none )
+
 
 
 -- SUBSCRIPTIONS
@@ -139,7 +150,7 @@ update msg model =
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    clipboard ClipboardUpdated
+    clipboard UpdateSentence
 
 
 
@@ -149,8 +160,8 @@ subscriptions _ =
 view : Model -> Html Msg
 view model =
     span []
-        [ text "Tags:"
-        , input
+        ([ text "Tags:"
+         , input
             [ style "margin-left" "red"
             , type_ "text"
             , value model.tagsInput
@@ -158,17 +169,42 @@ view model =
             , onBlur UpdateTags
             ]
             []
-        , text <|
-            case model.kotuStatus of
-                Success components ->
-                    String.join "" <| List.map (\a -> a.surface) components
+         , br [] []
+         ]
+            ++ (case model.kotuStatus of
+                    Success components ->
+                        if List.length components > 0 then
+                            [ hr [] []
+                            , button
+                                [ style "padding" "5px"
+                                , style "margin" "5px"
+                                , style "font-size" "16px"
+                                , onClick (UpdateSentence "")
+                                ]
+                                [ text "X" ]
+                            ]
+                                ++ List.map
+                                    (\component ->
+                                        button
+                                            [ style "padding" "5px"
+                                            , style "margin" "5px"
+                                            , style "font-size" "16px"
+                                            , onClick (SelectComponent component)
+                                            ]
+                                            [ text component.surface ]
+                                    )
+                                    components
 
-                Loading ->
-                    "..."
+                        else
+                            []
 
-                Failure ->
-                    "Something went wrong."
-        ]
+                    Loading ->
+                        [ text "..." ]
+
+                    Failure ->
+                        [ text "Something went wrong." ]
+               )
+        )
 
 
 
